@@ -73,7 +73,8 @@ def draft_next_selection():
     # Initialize the draft pool on the first pick
     if not st.session_state.draft_list:
         st.session_state.available_options = st.session_state.options.copy()
-        st.session_state.available_weights = current_weights.copy()
+        # FIX: Call get_current_weights() instead of accessing a non-existent variable
+        st.session_state.available_weights = get_current_weights().copy()
         total_weight = sum(st.session_state.available_weights)
         if total_weight > 0:
             st.session_state.available_weights = [(w / total_weight) * 100.0 for w in st.session_state.available_weights]
@@ -314,7 +315,8 @@ with results_col:
         )
         st.markdown("---")
         
-        current_weights = get_current_weights() if st.session_state.weight_method_radio == 'Percentages' else st.session_state.get('whole_weights', [1]*len(st.session_state.options))
+        # FIX: Simplified this line, as get_current_weights() handles both cases
+        current_weights = get_current_weights()
 
         if mode == "Pick a Single Winner":
             if len(st.session_state.options) < 1: st.warning("Please add at least one option.")
@@ -335,29 +337,57 @@ with results_col:
             is_disabled = max_picks == 0
             num_picks = st.number_input('Number of Options to Draft', min_value=1, max_value=max(1, max_picks), value=1, disabled=is_disabled)
 
+            # FIX: This function was rewritten to use get_current_weights()
+            # and be more robust.
             def run_draft():
                 reset_results()
+                
+                # Get the correct, current weights from the helper function
+                current_weights = get_current_weights() 
+
                 items_pool, weights_pool = [], []
                 if replacement:
+                    # This is for "Draft without replacement"
+                    # We initialize the available pools if this is the first run
                     if not st.session_state.available_options and not st.session_state.draft_list:
                         st.session_state.available_options = st.session_state.options.copy()
-                        st.session_state.available_weights = st.session_state.weights.copy()
+                        st.session_state.available_weights = current_weights.copy()
                     items_pool, weights_pool = st.session_state.available_options, st.session_state.available_weights
                 else:
-                    items_pool, weights_pool = st.session_state.options, st.session_state.weights
+                    # This is for "Draft with replacement"
+                    # We always use the full list of options and weights
+                    items_pool, weights_pool = st.session_state.options, current_weights.copy()
 
                 if not items_pool:
                     st.warning("No more options are available to draft!")
                     return
+                
+                # Add check for weight list mismatch or empty weights
+                if len(items_pool) != len(weights_pool):
+                    st.error(f"Weight/Option mismatch. {len(items_pool)} options, {len(weights_pool)} weights. Please reset.")
+                    return
+                
+                total_weight = sum(weights_pool)
 
                 for _ in range(num_picks):
                     if not items_pool: break
-                    picked = random.choices(items_pool, weights=weights_pool, k=1)[0]
+                    
+                    # Pick an item
+                    if total_weight > 0:
+                        picked = random.choices(items_pool, weights=weights_pool, k=1)[0]
+                    else:
+                        # If all weights are 0, pick uniformly
+                        st.warning("All weights are zero, picking uniformly.")
+                        picked = random.choice(items_pool)
+
                     st.session_state.draft_list.append(picked)
+                    
                     if replacement:
+                        # If drafting without replacement, remove the picked item from the pools
                         idx = items_pool.index(picked)
-                        del items_pool[idx]
-                        del weights_pool[idx]
+                        picked_weight = weights_pool.pop(idx) # Remove weight
+                        del items_pool[idx] # Remove item
+                        total_weight -= picked_weight # Update total weight
 
             btn_col1, btn_col2 = st.columns(2)
             btn_col1.button('🎲 Draft!', on_click=run_draft, use_container_width=True, disabled=is_disabled)
